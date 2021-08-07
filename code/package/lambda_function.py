@@ -76,7 +76,7 @@ def start(ins,reg):
 
 
 def send_message(msg,loc):
-    WEBHOOK_URL = 'https://hooks.slack.com/services/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'
+    WEBHOOK_URL = 'https://hooks.slack.com/services/Slackintegration'
     line="\n" + '-'*55 + "\n"
     try:
         if os.environ['status'] == 'stop':
