@@ -1,0 +1,114 @@
+import json
+import boto3
+import os
+import requests
+
+regions=[ i for i in os.environ['regions'].replace('[','').replace(']','').split(',')]
+
+def location(region):
+    session = boto3.Session(aws_access_key_id=os.environ['aws_access'], aws_secret_access_key=os.environ['aws_secret'], region_name=region)
+    ec2 = session.resource('ec2')
+    return ec2
+
+
+def lambda_handler(event, context):
+    updates={}
+    for loc in regions:
+        print(loc)
+        try:
+            if os.environ['status'] == 'stop' and os.environ['SuspenderSchedule'] != 'always-on' and ( os.environ['SuspenderSchedule'] == 'business-hours' or os.environ['SuspenderSchedule'] == 'always-off' ):
+                s=find_list(os.environ['SuspenderSchedule'],loc)
+                s1=stop(s,loc)
+                print(s,s1)
+                try:
+                    if  len(s1) > 0:
+                        updates[loc]=s1
+                    else:
+                        updates[loc]="No resources are on the filter -> {0}".format(os.environ['SuspenderSchedule'])
+                except Exception as e:
+                    updates[loc]="No Instance/resource found on applied tags".format(e)
+            elif os.environ['status'] == 'start' and os.environ['SuspenderSchedule'] == 'business-hours':
+                s=find_list(os.environ['SuspenderSchedule'],loc)
+                s1=start(s,loc)
+                print("Sarting server")
+                try:
+                    if  len(s1) > 0:
+                        updates[loc]=s1
+                    else:
+                        updates[loc]="No resources are on the filter -> {0}".format(os.environ['SuspenderSchedule'])
+                except Exception as e:
+                    updates[loc]="No Instance/resource found on applied tags".format(e)
+            else:
+                updates[loc]="In valid status variable"
+        except Exception as e:
+            updates[loc]="Please check status and tags variable are set ==> {0}".format(e)
+    send_message(updates)
+    return updates
+
+def find_list(tags,reg):
+    ec2=location(reg)
+    instance_list=[]
+    for instance in ec2.instances.all():
+        try:
+            for i in instance.tags:
+                if (i['Key'] == 'SuspenderSchedule' and (  i['Value'] == 'always-off' or  i['Value'] == tags ) and os.environ['status'] == 'stop'):
+                    instance_list.append(instance.id)
+                    print("hiii " + instance.id)
+                elif i['Key'] == 'SuspenderSchedule' and  i['Value'] == tags and os.environ['status'] != 'stop':
+                    instance_list.append(instance.id)
+        except Exception as e:
+            print(e)
+    return(instance_list)
+
+def stop(ins,reg):
+    states=[]
+    ec2=location(reg)
+    instance_list=[]
+    for i in ec2.instances.all():
+        if i.id in ins:
+            if i.state['Name'].lower() == "running":
+                states.append(i.id)
+    if len(states) > 0:
+        ec2.instances.stop(InstanceIds=states)
+        return states
+    else:
+        return
+
+
+def start(ins,reg):
+    states=[]
+    ec2=location(reg)
+    instance_list=[]
+    for i in ec2.instances.all():
+        if i.id in ins:
+            if i.state['Name'].lower() != "running":
+                states.append(i.id)
+    if len(states) > 0:
+        ec2.instances.start(InstanceIds=states)
+        return states
+    else:
+        return
+
+def send_message(msg):
+    WEBHOOK_URL = 'https://hooks.slack.com/services/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'
+    content=[]
+    try:
+        if os.environ['status'] == 'stop':
+            msg=str(os.environ['account_id']) + "    " + "Stopping"  +  "   " + "ec2" + "   " + str(msg)
+        elif os.environ['status'] == 'start':
+            msg=str(os.environ['account_id']) + "    " + "Starting"  +  "   " + "ec2" + "   " + str(msg)
+    except:
+        msg=str(msg)
+    if os.environ['status'] == 'start':
+        message = {
+            'as_user': True,
+            'text': str(msg)
+             }
+    elif os.environ['status'] == 'stop':
+        message = {
+            'as_user': True,
+            'text': str(msg)
+             }
+    response = requests.post(WEBHOOK_URL, data=json.dumps(message),headers={'Content-Type': 'application/json'})
+
+
